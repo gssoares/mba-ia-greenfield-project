@@ -17,6 +17,9 @@ async function bootstrap() {
     { name: JOBS.PURGE_STALE_UPLOADS, data: {} },
   );
 
-  Logger.log('Video worker started, consuming video-processing queue', 'Bootstrap');
+  Logger.log(
+    'Video worker started, consuming video-processing queue',
+    'Bootstrap',
+  );
 }
 void bootstrap();

@@ -13,11 +13,16 @@ const requiredEnv = {
   REDIS_HOST: 'redis',
 };
 
-const validate = (env: Record<string, string>) =>
-  envValidationSchema.validate(
+const validate = (env: Record<string, string | undefined>) => {
+  const result = envValidationSchema.validate(
     { ...requiredEnv, ...env },
     { allowUnknown: true, abortEarly: false },
   );
+  return {
+    value: result.value as Record<string, unknown>,
+    error: result.error,
+  };
+};
 
 describe('envValidationSchema — SWAGGER_ENABLED', () => {
   it('should reject SWAGGER_ENABLED with an invalid value', () => {

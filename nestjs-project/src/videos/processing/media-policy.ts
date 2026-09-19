@@ -21,8 +21,5 @@ export function assertSupportedMedia(probe: FfprobeResult): void {
 }
 
 export function thumbnailTimestamp(durationSeconds: number): number {
-  return Math.min(
-    0.1 * durationSeconds,
-    Math.max(durationSeconds - 0.1, 0),
-  );
+  return Math.min(0.1 * durationSeconds, Math.max(durationSeconds - 0.1, 0));
 }

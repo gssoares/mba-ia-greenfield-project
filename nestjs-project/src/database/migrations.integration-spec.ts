@@ -17,6 +17,8 @@ const MANAGED_TABLES = [
   'verification_tokens',
 ];
 
+const MANAGED_ENUM_TYPES = ['verification_tokens_type_enum'];
+
 describe('Database migrations (integration)', () => {
   let dataSource: DataSource;
 
@@ -35,12 +37,15 @@ describe('Database migrations (integration)', () => {
 
     await dataSource.initialize();
 
-    await Promise.all([
-      ...MANAGED_TABLES.map((table) =>
-        dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
-      ),
-      dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
-    ]);
+    // Sequential on purpose: concurrent DROP TABLE ... CASCADE on tables linked
+    // by foreign keys lock each other and fail with "deadlock detected".
+    for (const table of [...MANAGED_TABLES, 'migrations']) {
+      await dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`);
+    }
+    // DROP TABLE leaves enum types behind, and the migrations re-create them.
+    for (const enumType of MANAGED_ENUM_TYPES) {
+      await dataSource.query(`DROP TYPE IF EXISTS "${enumType}"`);
+    }
   });
 
   afterAll(async () => {
@@ -90,9 +95,6 @@ describe('Database migrations (integration)', () => {
        ORDER BY table_name`,
       [['users', 'channels']],
     );
-    expect(remaining.map((r) => r.table_name)).toEqual([
-      'channels',
-      'users',
-    ]);
+    expect(remaining.map((r) => r.table_name)).toEqual(['channels', 'users']);
   });
 });

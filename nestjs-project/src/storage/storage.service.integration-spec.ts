@@ -133,9 +133,7 @@ describe('StorageService (integration)', () => {
       );
       const rule = Rules!.find((r) => r.ID === 'abort-incomplete-multipart');
       expect(rule).toBeDefined();
-      expect(rule!.AbortIncompleteMultipartUpload?.DaysAfterInitiation).toBe(
-        1,
-      );
+      expect(rule!.AbortIncompleteMultipartUpload?.DaysAfterInitiation).toBe(1);
     });
 
     it('re-applying the bucket bootstrap does not duplicate or break the configuration', async () => {

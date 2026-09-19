@@ -44,9 +44,7 @@ function run(command: string, args: string[]): Promise<{ stdout: string }> {
       if (code === 0) {
         resolve({ stdout });
       } else {
-        reject(
-          new FfmpegCommandError(`${command} ${args.join(' ')}`, stderr),
-        );
+        reject(new FfmpegCommandError(`${command} ${args.join(' ')}`, stderr));
       }
     });
   });

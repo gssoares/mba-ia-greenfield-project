@@ -172,7 +172,9 @@ describe('VideoProcessingProcessor (integration)', () => {
     expect(updated?.height).toBe(360);
     expect(updated?.duration_seconds).not.toBeNull();
     expect(updated?.processed_at).not.toBeNull();
-    expect(updated?.video_object_key).toBe(`videos/${video.public_id}/video.mp4`);
+    expect(updated?.video_object_key).toBe(
+      `videos/${video.public_id}/video.mp4`,
+    );
     expect(updated?.thumbnail_object_key).toBe(
       `videos/${video.public_id}/thumbnail.jpg`,
     );

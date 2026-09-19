@@ -38,7 +38,7 @@ Implemented in `nestjs-project/src/videos/` (module details in `nestjs-project/C
 | `POST /videos/:public_id/upload-completion` | 202 | Body `{ parts: [{ part_number, etag }] }`. Completes the multipart upload, verifies the final size, marks the video `processing` and enqueues the processing job |
 | `GET /videos/:public_id` | 200 | Processing status and extracted metadata |
 | `GET /videos/:public_id/playback-url` | 200 | Presigned GET URL for progressive playback (only when `ready`, else `409 VIDEO_NOT_READY`) |
-| `GET /videos/:public_id/download-url` | 200 | Presigned GET URL served as an attachment (only when `ready`) |
+| `GET /videos/:public_id/download-url` | 200 | Presigned GET URL (only when `ready`) that requests `Content-Disposition: attachment; filename="<original name>.mp4"` through the `response-content-disposition` query parameter. Observed with Garage v2.4.1: the URL is accepted (`206` with Range) but the response carries no `Content-Disposition` header, so the download is not forced yet |
 
 Limits: files up to 10 GiB, sent in 64 MiB parts; accepted content types are `video/mp4` and `video/quicktime`.
 

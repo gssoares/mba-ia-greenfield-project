@@ -117,7 +117,7 @@ docker compose exec nestjs-api npm run test:e2e -- --runInBand   # the script it
 
 Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables (and obliterate queues) concurrently.
 
-Storage, queue and video-processing tests run against real infrastructure: `db`, `redis` and `garage` (with `garage-init` finished) must be up, and the FFmpeg tests use the real `ffmpeg`/`ffprobe` installed in the `nestjs-api` image. Tests that need a `@Processor` to consume jobs must call `module.init()` after `.compile()`, because the BullMQ worker only starts in `onModuleInit`. Presigned URLs are issued for `STORAGE_PUBLIC_ENDPOINT`, which is unreachable from inside the container, so these tests override it to `http://host.docker.internal:3900`.
+Storage, queue and video-processing tests run against real infrastructure: `db`, `redis` and `garage` (with `garage-init` finished) must be up, and the FFmpeg tests use the real `ffmpeg`/`ffprobe` installed in the `nestjs-api` image. A running video worker consumes the same `video-processing` queue the tests enqueue into, so stop it before running the suite (`docker compose restart video-worker` kills the process and leaves the container idle). `src/database/migrations.integration-spec.ts` drops every managed table in the shared database in its `beforeAll` and re-applies the migrations in its `afterAll`. Tests that need a `@Processor` to consume jobs must call `module.init()` after `.compile()`, because the BullMQ worker only starts in `onModuleInit`. Presigned URLs are issued for `STORAGE_PUBLIC_ENDPOINT`, which is unreachable from inside the container, so these tests override it to `http://host.docker.internal:3900`.
 
 During active development, run only the tests related to the file being changed (`npm test -- path/to/file.spec.ts`). Before declaring a task done, run the full suite — see the global `CLAUDE.md` → "Definition of Done (Technical)".
 
@@ -220,7 +220,7 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off
 - **Decorators:** `emitDecoratorMetadata` + `experimentalDecorators` enabled — required for NestJS DI
 - **Prettier:** single quotes, trailing commas everywhere
-- **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings
+- **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings; `unbound-method` is off in test files (`*.spec.ts`, `*.integration-spec.ts`, `*.e2e-spec.ts`) because `expect(mock.method)` on `jest.Mocked<T>` is a known false positive, and stays on for production code
 
 ## REST Conventions
 

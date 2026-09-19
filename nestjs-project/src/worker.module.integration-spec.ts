@@ -47,9 +47,7 @@ describe('WorkerModule (integration)', () => {
       (s) => s.key === JOBS.PURGE_STALE_UPLOADS,
     );
     expect(purgeSchedulers).toHaveLength(1);
-    expect(purgeSchedulers[0].pattern).toBe(
-      SCHEDULES.PURGE_STALE_UPLOADS_CRON,
-    );
+    expect(purgeSchedulers[0].pattern).toBe(SCHEDULES.PURGE_STALE_UPLOADS_CRON);
 
     await module.close();
   }, 30000);

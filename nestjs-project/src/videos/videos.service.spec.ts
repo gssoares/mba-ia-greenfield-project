@@ -8,7 +8,7 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
 } from '@aws-sdk/client-s3';
-import { DataSource, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, QueryFailedError } from 'typeorm';
 import {
   InvalidPartNumberException,
   UnsupportedVideoContentTypeException,
@@ -25,15 +25,15 @@ import { VideosService } from './videos.service';
 import { MAX_UPLOAD_BYTES, PART_SIZE_BYTES } from './videos.constants';
 
 function makeUniqueViolationOnPublicId(): QueryFailedError {
-  const err = new QueryFailedError('INSERT', [], new Error()) as any;
-  err.code = '23505';
-  err.detail = 'Key (public_id)=(aaaaaaaaaaa) already exists.';
-  return err;
+  return Object.assign(new QueryFailedError('INSERT', [], new Error()), {
+    code: '23505',
+    detail: 'Key (public_id)=(aaaaaaaaaaa) already exists.',
+  });
 }
 
 describe('VideosService — initiateUpload', () => {
   let videosService: VideosService;
-  let videoRepository: jest.Mocked<Repository<Video>>;
+  let videoRepository: { create: jest.Mock; save: jest.Mock };
   let storageService: { client: { send: jest.Mock }; bucket: string };
 
   const baseDto = {
@@ -57,22 +57,21 @@ describe('VideosService — initiateUpload', () => {
       throw new Error('Unexpected command sent to storage client');
     });
 
+    videoRepository = {
+      create: jest.fn((attrs: Partial<Video>) => attrs),
+      save: jest.fn().mockImplementation((entity: Partial<Video>) =>
+        Promise.resolve({
+          ...entity,
+          processing_status: 'uploading',
+          created_at: new Date('2026-09-17T12:00:00.000Z'),
+        }),
+      ),
+    };
+
     const module = await Test.createTestingModule({
       providers: [
         VideosService,
-        {
-          provide: getRepositoryToken(Video),
-          useValue: {
-            create: jest.fn((attrs) => attrs),
-            save: jest.fn().mockImplementation((entity) =>
-              Promise.resolve({
-                ...entity,
-                processing_status: 'uploading',
-                created_at: new Date('2026-09-17T12:00:00.000Z'),
-              }),
-            ),
-          },
-        },
+        { provide: getRepositoryToken(Video), useValue: videoRepository },
         { provide: StorageService, useValue: storageService },
         { provide: DataSource, useValue: { transaction: jest.fn() } },
         {
@@ -83,7 +82,6 @@ describe('VideosService — initiateUpload', () => {
     }).compile();
 
     videosService = module.get(VideosService);
-    videoRepository = module.get(getRepositoryToken(Video));
   });
 
   it('should reject a file above the 10 GiB limit with UPLOAD_TOO_LARGE', async () => {
@@ -126,7 +124,7 @@ describe('VideosService — initiateUpload', () => {
           ...entity,
           processing_status: 'uploading',
           created_at: new Date('2026-09-17T12:00:00.000Z'),
-        }),
+        } as Video),
       );
 
     const result = await videosService.initiateUpload('user-1', baseDto);
@@ -147,11 +145,13 @@ describe('VideosService — initiateUpload', () => {
       videosService.initiateUpload('user-1', baseDto),
     ).rejects.toThrow(dbError);
 
-    const abortCall = storageService.client.send.mock.calls.find(
-      ([command]) => command instanceof AbortMultipartUploadCommand,
-    );
+    const abortCall = (
+      storageService.client.send.mock.calls as [unknown][]
+    ).find(([command]) => command instanceof AbortMultipartUploadCommand);
     expect(abortCall).toBeDefined();
-    expect(abortCall![0].input).toMatchObject({ UploadId: 'test-upload-id' });
+    expect((abortCall![0] as AbortMultipartUploadCommand).input).toMatchObject({
+      UploadId: 'test-upload-id',
+    });
   });
 });
 
@@ -194,7 +194,9 @@ describe('VideosService — findOwnedByPublicId / signUploadParts / listUploaded
     videoRepository = { createQueryBuilder: jest.fn() };
     storageService = {
       client: { send: jest.fn() },
-      presignUploadPart: jest.fn().mockResolvedValue('https://signed.example/part'),
+      presignUploadPart: jest
+        .fn()
+        .mockResolvedValue('https://signed.example/part'),
       bucket: 'streamtube-videos',
     };
   });
@@ -217,7 +219,9 @@ describe('VideosService — findOwnedByPublicId / signUploadParts / listUploaded
 
   describe('findOwnedByPublicId', () => {
     it('should throw VIDEO_NOT_FOUND when the public_id does not exist', async () => {
-      videoRepository.createQueryBuilder.mockReturnValue(makeQueryBuilder(null));
+      videoRepository.createQueryBuilder.mockReturnValue(
+        makeQueryBuilder(null),
+      );
       await build();
 
       await expect(
@@ -240,7 +244,9 @@ describe('VideosService — findOwnedByPublicId / signUploadParts / listUploaded
   describe('signUploadParts', () => {
     it('should throw UPLOAD_NOT_IN_PROGRESS when processing_status is not uploading', async () => {
       videoRepository.createQueryBuilder.mockReturnValue(
-        makeQueryBuilder(baseVideo({ processing_status: 'processing' }) as Video),
+        makeQueryBuilder(
+          baseVideo({ processing_status: 'processing' }) as Video,
+        ),
       );
       await build();
 
@@ -266,9 +272,11 @@ describe('VideosService — findOwnedByPublicId / signUploadParts / listUploaded
       );
       await build();
 
-      const result = await videosService.signUploadParts(ownerId, publicId, [
-        1, 2,
-      ]);
+      const result = await videosService.signUploadParts(
+        ownerId,
+        publicId,
+        [1, 2],
+      );
 
       expect(result.parts).toHaveLength(2);
       expect(storageService.presignUploadPart).toHaveBeenCalledWith(
@@ -406,7 +414,9 @@ describe('VideosService — completeUpload', () => {
   beforeEach(() => {
     videoRepository = { createQueryBuilder: jest.fn() };
     manager = { update: jest.fn().mockResolvedValue(undefined) };
-    dataSource = { transaction: jest.fn((cb) => cb(manager)) };
+    dataSource = {
+      transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
+    };
     videoProcessingQueue = { add: jest.fn().mockResolvedValue(undefined) };
     storageService = {
       client: { send: jest.fn() },
@@ -432,9 +442,7 @@ describe('VideosService — completeUpload', () => {
 
   it('should throw UPLOAD_NOT_IN_PROGRESS when processing_status is not uploading', async () => {
     videoRepository.createQueryBuilder.mockReturnValue(
-      makeQueryBuilder(
-        baseVideo({ processing_status: 'processing' }) as Video,
-      ),
+      makeQueryBuilder(baseVideo({ processing_status: 'processing' }) as Video),
     );
     await build();
 
@@ -584,7 +592,9 @@ describe('VideosService — getPlaybackUrl / getDownloadUrl', () => {
   beforeEach(() => {
     videoRepository = { createQueryBuilder: jest.fn() };
     storageService = {
-      presignGetObject: jest.fn().mockResolvedValue('https://signed.example/video.mp4'),
+      presignGetObject: jest
+        .fn()
+        .mockResolvedValue('https://signed.example/video.mp4'),
     };
   });
 

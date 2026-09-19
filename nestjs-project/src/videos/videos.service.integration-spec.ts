@@ -186,7 +186,7 @@ describe('VideosService.signUploadParts + listUploadedParts (integration)', () =
     expect(uploaded).toEqual([
       {
         part_number: 1,
-        etag: expect.any(String),
+        etag: expect.any(String) as string,
         size_bytes: PART_SIZE_BYTES,
       },
     ]);
@@ -400,10 +400,7 @@ describe('VideosService.getPlaybackUrl + getDownloadUrl (integration)', () => {
   it('signs a playback URL that serves a 206 Partial Content response for a Range request', async () => {
     const video = await createReadyVideo();
 
-    const result = await videosService.getPlaybackUrl(
-      user.id,
-      video.public_id,
-    );
+    const result = await videosService.getPlaybackUrl(user.id, video.public_id);
     expect(new URL(result.url).host).toBe('host.docker.internal:3900');
 
     const res = await fetch(result.url, {
@@ -417,10 +414,7 @@ describe('VideosService.getPlaybackUrl + getDownloadUrl (integration)', () => {
   it('signs a download URL that serves the video with a sanitized Content-Disposition', async () => {
     const video = await createReadyVideo('clip.mov');
 
-    const result = await videosService.getDownloadUrl(
-      user.id,
-      video.public_id,
-    );
+    const result = await videosService.getDownloadUrl(user.id, video.public_id);
 
     const res = await fetch(result.url);
     expect(res.headers.get('content-disposition')).toBe(

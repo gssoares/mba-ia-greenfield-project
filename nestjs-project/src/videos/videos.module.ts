@@ -7,11 +7,7 @@ import { VideosController } from './videos.controller';
 import { VideosService } from './videos.service';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Video]),
-    QueueModule,
-    StorageModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Video]), QueueModule, StorageModule],
   controllers: [VideosController],
   providers: [VideosService],
   exports: [TypeOrmModule],

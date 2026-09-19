@@ -10,6 +10,7 @@ import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { AppModule } from '../src/app.module';
 import { AuthService } from '../src/auth/auth.service';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
+import { MailService } from '../src/mail/mail.service';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { QUEUES } from '../src/queue/queue.constants';
 import { StorageService } from '../src/storage/storage.service';
@@ -23,6 +24,34 @@ import { PART_SIZE_BYTES } from '../src/videos/videos.constants';
 // process.env is a shared global across e2e spec files in the same run.
 const ORIGINAL_STORAGE_PUBLIC_ENDPOINT = process.env.STORAGE_PUBLIC_ENDPOINT;
 process.env.STORAGE_PUBLIC_ENDPOINT = 'http://host.docker.internal:3900';
+
+interface ResponseBody {
+  access_token: string;
+  error: string;
+  public_id: string;
+  processing_status: string;
+  publication_status: string;
+  failure_code: string | null;
+  part_size_bytes: number;
+  part_count: number;
+  parts: {
+    part_number: number;
+    url: string;
+    expires_at: string;
+    etag: string;
+    size_bytes: number;
+  }[];
+  url: string;
+  expires_at: string;
+  duration_seconds: number | null;
+  width: number | null;
+  height: number | null;
+  video_codec: string | null;
+  processed_at: string | null;
+}
+
+const bodyOf = (res: { body: unknown }): ResponseBody =>
+  res.body as ResponseBody;
 
 describe('Videos (e2e)', () => {
   let app: INestApplication<App>;
@@ -70,12 +99,15 @@ describe('Videos (e2e)', () => {
     password = 'password123',
   ): Promise<string> {
     const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
+    const mailServiceInstance = (
+      authService as unknown as { mailService: MailService }
+    ).mailService;
     let capturedToken = '';
     jest
       .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
         capturedToken = t;
+        return Promise.resolve();
       });
     await request(app.getHttpServer())
       .post('/auth/register')
@@ -94,7 +126,7 @@ describe('Videos (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email, password });
-    return res.body.access_token;
+    return bodyOf(res).access_token;
   }
 
   beforeEach(async () => {
@@ -117,7 +149,7 @@ describe('Videos (e2e)', () => {
         content_type: 'video/mp4',
         ...overrides,
       });
-    return res.body;
+    return bodyOf(res);
   }
 
   async function initiateSmallUpload(
@@ -131,7 +163,7 @@ describe('Videos (e2e)', () => {
         size_bytes: 1024,
         content_type: 'video/mp4',
       });
-    return res.body;
+    return bodyOf(res);
   }
 
   async function uploadSinglePart(
@@ -144,7 +176,7 @@ describe('Videos (e2e)', () => {
       .send({ part_numbers: [1] })
       .expect(200);
 
-    const putResponse = await fetch(signed.body.parts[0].url, {
+    const putResponse = await fetch(bodyOf(signed).parts[0].url, {
       method: 'PUT',
       body: Buffer.alloc(1024, 'a'),
     });
@@ -189,14 +221,20 @@ describe('Videos (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.public_id).toHaveLength(11);
-      expect(res.body.processing_status).toBe('uploading');
-      expect(res.body.part_size_bytes).toBe(67108864);
-      expect(res.body.part_count).toBe(2);
+      expect(bodyOf(res).public_id).toHaveLength(11);
+      expect(bodyOf(res).processing_status).toBe('uploading');
+      expect(bodyOf(res).part_size_bytes).toBe(67108864);
+      expect(bodyOf(res).part_count).toBe(2);
 
-      const video = await dataSource.query(
+      const video = await dataSource.query<
+        {
+          publication_status: string;
+          user_id: string;
+          upload_id: string | null;
+        }[]
+      >(
         'SELECT publication_status, user_id, upload_id FROM videos WHERE public_id = $1',
-        [res.body.public_id],
+        [bodyOf(res).public_id],
       );
       expect(video).toHaveLength(1);
       expect(video[0].publication_status).toBe('draft');
@@ -214,10 +252,12 @@ describe('Videos (e2e)', () => {
         })
         .expect(413)
         .expect((res) => {
-          expect(res.body.error).toBe('UPLOAD_TOO_LARGE');
+          expect(bodyOf(res).error).toBe('UPLOAD_TOO_LARGE');
         });
 
-      const videos = await dataSource.query('SELECT id FROM videos');
+      const videos = await dataSource.query<{ id: string }[]>(
+        'SELECT id FROM videos',
+      );
       expect(videos).toHaveLength(0);
     });
 
@@ -232,7 +272,7 @@ describe('Videos (e2e)', () => {
         })
         .expect(415)
         .expect((res) => {
-          expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
+          expect(bodyOf(res).error).toBe('UNSUPPORTED_MEDIA_TYPE');
         });
     });
 
@@ -243,7 +283,7 @@ describe('Videos (e2e)', () => {
         .send({ size_bytes: 104857600, content_type: 'video/mp4' })
         .expect(400)
         .expect((res) => {
-          expect(res.body.error).toBe('VALIDATION_ERROR');
+          expect(bodyOf(res).error).toBe('VALIDATION_ERROR');
         });
     });
 
@@ -283,9 +323,9 @@ describe('Videos (e2e)', () => {
         .send({ part_numbers: [1, 2] })
         .expect(200);
 
-      expect(res.body.parts).toHaveLength(2);
+      expect(bodyOf(res).parts).toHaveLength(2);
       const issuedAt = Date.now();
-      for (const part of res.body.parts) {
+      for (const part of bodyOf(res).parts) {
         expect(new URL(part.url).host).toBe('host.docker.internal:3900');
         const expiresAt = new Date(part.expires_at).getTime();
         expect(expiresAt).toBeGreaterThan(issuedAt + 3599_000);
@@ -302,7 +342,7 @@ describe('Videos (e2e)', () => {
         .send({ part_numbers: [3] })
         .expect(400)
         .expect((res) => {
-          expect(res.body.error).toBe('INVALID_PART_NUMBER');
+          expect(bodyOf(res).error).toBe('INVALID_PART_NUMBER');
         });
     });
 
@@ -318,7 +358,7 @@ describe('Videos (e2e)', () => {
         .send({ part_numbers: [1] })
         .expect(404)
         .expect((res) => {
-          expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+          expect(bodyOf(res).error).toBe('VIDEO_NOT_FOUND');
         });
 
       await request(app.getHttpServer())
@@ -326,7 +366,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${otherToken}`)
         .expect(404)
         .expect((res) => {
-          expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+          expect(bodyOf(res).error).toBe('VIDEO_NOT_FOUND');
         });
     });
 
@@ -343,7 +383,7 @@ describe('Videos (e2e)', () => {
         .send({ part_numbers: [1] })
         .expect(409)
         .expect((res) => {
-          expect(res.body.error).toBe('UPLOAD_NOT_IN_PROGRESS');
+          expect(bodyOf(res).error).toBe('UPLOAD_NOT_IN_PROGRESS');
         });
 
       await request(app.getHttpServer())
@@ -351,7 +391,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(409)
         .expect((res) => {
-          expect(res.body.error).toBe('UPLOAD_NOT_IN_PROGRESS');
+          expect(bodyOf(res).error).toBe('UPLOAD_NOT_IN_PROGRESS');
         });
     });
   });
@@ -367,7 +407,7 @@ describe('Videos (e2e)', () => {
         .expect(200);
 
       const partBody = Buffer.alloc(PART_SIZE_BYTES, 'a');
-      const putResponse = await fetch(signed.body.parts[0].url, {
+      const putResponse = await fetch(bodyOf(signed).parts[0].url, {
         method: 'PUT',
         body: partBody,
       });
@@ -378,10 +418,10 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.parts).toHaveLength(1);
-      expect(res.body.parts[0].part_number).toBe(1);
-      expect(res.body.parts[0].etag).toBeDefined();
-      expect(res.body.parts[0].size_bytes).toBe(PART_SIZE_BYTES);
+      expect(bodyOf(res).parts).toHaveLength(1);
+      expect(bodyOf(res).parts[0].part_number).toBe(1);
+      expect(bodyOf(res).parts[0].etag).toBeDefined();
+      expect(bodyOf(res).parts[0].size_bytes).toBe(PART_SIZE_BYTES);
     }, 30000);
   });
 
@@ -396,12 +436,19 @@ describe('Videos (e2e)', () => {
         .send({ parts: [part] })
         .expect(202);
 
-      expect(res.body).toEqual({
+      expect(bodyOf(res)).toEqual({
         public_id: video.public_id,
         processing_status: 'processing',
       });
 
-      const rows = await dataSource.query(
+      const rows = await dataSource.query<
+        {
+          id: string;
+          processing_status: string;
+          upload_completed_at: Date | null;
+          upload_id: string | null;
+        }[]
+      >(
         'SELECT id, processing_status, upload_completed_at, upload_id FROM videos WHERE public_id = $1',
         [video.public_id],
       );
@@ -423,7 +470,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .send({ part_numbers: [1] })
         .expect(200);
-      const putResponse = await fetch(signed.body.parts[0].url, {
+      const putResponse = await fetch(bodyOf(signed).parts[0].url, {
         method: 'PUT',
         body: Buffer.alloc(PART_SIZE_BYTES, 'a'),
       });
@@ -435,10 +482,10 @@ describe('Videos (e2e)', () => {
         .send({ parts: [{ part_number: 1, etag }] })
         .expect(422)
         .expect((res) => {
-          expect(res.body.error).toBe('UPLOAD_INCOMPLETE');
+          expect(bodyOf(res).error).toBe('UPLOAD_INCOMPLETE');
         });
 
-      const rows = await dataSource.query(
+      const rows = await dataSource.query<{ processing_status: string }[]>(
         'SELECT processing_status FROM videos WHERE public_id = $1',
         [video.public_id],
       );
@@ -461,7 +508,7 @@ describe('Videos (e2e)', () => {
         .send({ parts: [part] })
         .expect(409)
         .expect((res) => {
-          expect(res.body.error).toBe('UPLOAD_NOT_IN_PROGRESS');
+          expect(bodyOf(res).error).toBe('UPLOAD_NOT_IN_PROGRESS');
         });
 
       const counts = await videoProcessingQueue.getJobCounts(
@@ -484,7 +531,7 @@ describe('Videos (e2e)', () => {
         .send({ parts: [{ part_number: 1, etag: '"whatever"' }] })
         .expect(404)
         .expect((res) => {
-          expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+          expect(bodyOf(res).error).toBe('VIDEO_NOT_FOUND');
         });
     });
   });
@@ -498,10 +545,10 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.processing_status).toBe('uploading');
-      expect(res.body.publication_status).toBe('draft');
-      expect(res.body.failure_code).toBeNull();
-      expect(res.body.duration_seconds).toBeNull();
+      expect(bodyOf(res).processing_status).toBe('uploading');
+      expect(bodyOf(res).publication_status).toBe('draft');
+      expect(bodyOf(res).failure_code).toBeNull();
+      expect(bodyOf(res).duration_seconds).toBeNull();
     });
 
     it('returns-processed-metadata-when-ready', async () => {
@@ -518,11 +565,11 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.duration_seconds).toBe(12.345);
-      expect(res.body.width).toBe(1920);
-      expect(res.body.height).toBe(1080);
-      expect(res.body.video_codec).toBe('h264');
-      expect(res.body.processed_at).not.toBeNull();
+      expect(bodyOf(res).duration_seconds).toBe(12.345);
+      expect(bodyOf(res).width).toBe(1920);
+      expect(bodyOf(res).height).toBe(1080);
+      expect(bodyOf(res).video_codec).toBe('h264');
+      expect(bodyOf(res).processed_at).not.toBeNull();
     });
 
     it('returns-failure-code-when-failed', async () => {
@@ -537,7 +584,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.failure_code).toBe('UNSUPPORTED_CODEC');
+      expect(bodyOf(res).failure_code).toBe('UNSUPPORTED_CODEC');
     });
 
     it('omits-internal-fields-from-response-body', async () => {
@@ -548,12 +595,12 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body).not.toHaveProperty('id');
-      expect(res.body).not.toHaveProperty('user_id');
-      expect(res.body).not.toHaveProperty('upload_id');
-      expect(res.body).not.toHaveProperty('source_object_key');
-      expect(res.body).not.toHaveProperty('video_object_key');
-      expect(res.body).not.toHaveProperty('thumbnail_object_key');
+      expect(bodyOf(res)).not.toHaveProperty('id');
+      expect(bodyOf(res)).not.toHaveProperty('user_id');
+      expect(bodyOf(res)).not.toHaveProperty('upload_id');
+      expect(bodyOf(res)).not.toHaveProperty('source_object_key');
+      expect(bodyOf(res)).not.toHaveProperty('video_object_key');
+      expect(bodyOf(res)).not.toHaveProperty('thumbnail_object_key');
     });
 
     it('rejects-non-owner-and-missing-token', async () => {
@@ -567,7 +614,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${otherToken}`)
         .expect(404)
         .expect((res) => {
-          expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+          expect(bodyOf(res).error).toBe('VIDEO_NOT_FOUND');
         });
 
       await request(app.getHttpServer())
@@ -585,16 +632,16 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      const url = new URL(res.body.url);
+      const url = new URL(bodyOf(res).url);
       expect(url.host).toBe('host.docker.internal:3900');
       expect(url.searchParams.get('X-Amz-Expires')).toBe('21600');
 
       const issuedAt = Date.now();
-      const expiresAt = new Date(res.body.expires_at).getTime();
+      const expiresAt = new Date(bodyOf(res).expires_at).getTime();
       expect(expiresAt - issuedAt).toBeGreaterThan(21600 * 1000 - 5000);
       expect(expiresAt - issuedAt).toBeLessThan(21600 * 1000 + 5000);
 
-      const rangeRes = await fetch(res.body.url, {
+      const rangeRes = await fetch(bodyOf(res).url, {
         headers: { Range: 'bytes=0-1023' },
       });
       expect(rangeRes.status).toBe(206);
@@ -614,7 +661,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(409)
         .expect((res) => {
-          expect(res.body.error).toBe('VIDEO_NOT_READY');
+          expect(bodyOf(res).error).toBe('VIDEO_NOT_READY');
         });
     });
 
@@ -629,7 +676,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${otherToken}`)
         .expect(404)
         .expect((res) => {
-          expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+          expect(bodyOf(res).error).toBe('VIDEO_NOT_FOUND');
         });
     });
   });
@@ -644,11 +691,11 @@ describe('Videos (e2e)', () => {
         .expect(200);
 
       const issuedAt = Date.now();
-      const expiresAt = new Date(res.body.expires_at).getTime();
+      const expiresAt = new Date(bodyOf(res).expires_at).getTime();
       expect(expiresAt - issuedAt).toBeGreaterThan(900 * 1000 - 5000);
       expect(expiresAt - issuedAt).toBeLessThan(900 * 1000 + 5000);
 
-      const downloadRes = await fetch(res.body.url);
+      const downloadRes = await fetch(bodyOf(res).url);
       expect(downloadRes.headers.get('content-disposition')).toBe(
         'attachment; filename="clip.mp4"',
       );
@@ -666,7 +713,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(409)
         .expect((res) => {
-          expect(res.body.error).toBe('VIDEO_NOT_READY');
+          expect(bodyOf(res).error).toBe('VIDEO_NOT_READY');
         });
     });
 
@@ -681,7 +728,7 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${otherToken}`)
         .expect(404)
         .expect((res) => {
-          expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+          expect(bodyOf(res).error).toBe('VIDEO_NOT_FOUND');
         });
     });
   });

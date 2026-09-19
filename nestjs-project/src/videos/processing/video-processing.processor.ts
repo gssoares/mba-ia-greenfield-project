@@ -16,7 +16,7 @@ import { Repository } from 'typeorm';
 import { QUEUES } from '../../queue/queue.constants';
 import { StorageService } from '../../storage/storage.service';
 import { Video } from '../entities/video.entity';
-import { FfmpegService } from './ffmpeg.service';
+import { FfmpegService, type FfprobeResult } from './ffmpeg.service';
 import { assertSupportedMedia, thumbnailTimestamp } from './media-policy';
 
 const DEFAULT_FAILURE_CODE = 'PROCESSING_FAILED';
@@ -59,7 +59,7 @@ export class VideoProcessingProcessor extends WorkerHost {
         createWriteStream(originalPath),
       );
 
-      let probe;
+      let probe: FfprobeResult;
       try {
         probe = await this.ffmpegService.probe(originalPath);
       } catch {

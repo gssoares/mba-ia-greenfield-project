@@ -1,5 +1,4 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
 import { QUEUES } from '../../queue/queue.constants';
 import { VideoMaintenanceService } from './video-maintenance.service';
 
@@ -11,7 +10,7 @@ export class VideoMaintenanceProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job): Promise<void> {
+  async process(): Promise<void> {
     const now = new Date();
     await this.videoMaintenanceService.purgeStaleUploads(now);
     await this.videoMaintenanceService.deleteExpiredFailedOriginals(now);
