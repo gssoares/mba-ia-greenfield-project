@@ -145,7 +145,7 @@ Entregar upload de até 10GB funcional sem impacto na performance (armazenamento
 ### SI-03.5 — Endpoint POST /videos (pré-cadastro e início do upload)
 
 **Route:** POST /videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload-initiate.plan.md`
 **Authorization:** Authenticated (guard global `JwtAuthGuard`)
 
 **Description:** Expor o endpoint que valida o arquivo declarado, pré-cadastra o vídeo como rascunho e abre o multipart upload no storage — início de todo upload e origem do `public_id`.
@@ -182,7 +182,7 @@ Entregar upload de até 10GB funcional sem impacto na performance (armazenamento
 ### SI-03.6 — Endpoints de partes do upload (assinar e listar)
 
 **Route:** POST /videos/:public_id/upload-parts · GET /videos/:public_id/upload-parts
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload-parts.plan.md`
 **Authorization:** Owner (non-owner recebe `404 VIDEO_NOT_FOUND`)
 
 **Description:** Expor a assinatura de URLs de partes e a listagem das partes já armazenadas — o que permite ao browser enviar bytes direto ao storage e retomar um upload interrompido.
@@ -217,7 +217,7 @@ Entregar upload de até 10GB funcional sem impacto na performance (armazenamento
 ### SI-03.7 — Endpoint de conclusão do upload e enfileiramento do processamento
 
 **Route:** POST /videos/:public_id/upload-completion
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload-completion.plan.md`
 **Authorization:** Owner (non-owner recebe `404 VIDEO_NOT_FOUND`)
 
 **Description:** Expor o sinal de conclusão do upload, que fecha o multipart no storage, valida o objeto final, move o vídeo para `processing` e enfileira o processamento — a ponte entre upload e worker.
@@ -253,7 +253,7 @@ Entregar upload de até 10GB funcional sem impacto na performance (armazenamento
 ### SI-03.8 — Endpoint GET /videos/:public_id (status e metadados)
 
 **Route:** GET /videos/:public_id
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-detail.plan.md`
 **Authorization:** Owner (non-owner recebe `404 VIDEO_NOT_FOUND`)
 
 **Description:** Expor ao owner o estado de processamento e os metadados extraídos do vídeo — é por aqui que o cliente acompanha `uploading → processing → ready | failed` depois do `202` de conclusão.
@@ -319,7 +319,7 @@ Entregar upload de até 10GB funcional sem impacto na performance (armazenamento
 ### SI-03.10 — Endpoints de URL de reprodução e download
 
 **Route:** GET /videos/:public_id/playback-url · GET /videos/:public_id/download-url
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-media-urls.plan.md`
 **Authorization:** Owner (non-owner recebe `404 VIDEO_NOT_FOUND`)
 
 **Description:** Emitir URLs assinadas de curta duração para reprodução progressiva e download do vídeo processado — as capabilities de streaming e download, sem que bytes de mídia passem pelos servidores Node.

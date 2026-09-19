@@ -392,6 +392,7 @@ Environment facts that constrain every option below:
 **Recommendation:** **Option A (Progressive playback over HTTP Range)** — it satisfies "sem necessidade de download completo" natively with no transcoding or player dependency, consistent with TD-10 B; HLS can be added later as an additional output without changing the upload pipeline.
 
 **Decision:** Option A (Progressive playback over HTTP Range)
+
 ---
 
 ## TD-12: Media Access Delivery (playback & download URLs)

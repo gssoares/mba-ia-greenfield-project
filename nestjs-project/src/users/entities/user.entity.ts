@@ -2,11 +2,13 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  OneToMany,
   OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { Channel } from '../../channels/entities/channel.entity';
+import { Video } from '../../videos/entities/video.entity';
 
 @Entity('users')
 export class User {
@@ -30,4 +32,7 @@ export class User {
 
   @OneToOne(() => Channel, (channel) => channel.user, { cascade: true })
   channel: Channel;
+
+  @OneToMany(() => Video, (video) => video.user)
+  videos: Video[];
 }
