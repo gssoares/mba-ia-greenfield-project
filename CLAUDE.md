@@ -10,21 +10,39 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
+- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express) and its Docker Compose stack. Domain modules: `auth`, `users`, `channels`, `videos`. Infrastructure modules: `storage` (S3 client), `queue` (BullMQ), `mail`. Also hosts the video worker entrypoint (`src/worker.ts`).
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` — Frontend (Next.js 16, React 19) with its own `CLAUDE.md`. It does not consume the videos endpoints yet (no upload UI).
 
 ## Architecture (C4 Container Diagram)
 
-See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
+See `docs/diagrams/software-arch.mermaid` for the full diagram. The diagram is technology-agnostic (it still shows the queue as "TBD" and storage as "S3 or MinIO"); the concrete choices are listed below. Key containers:
 
-- **Frontend** (Next.js) → calls API via REST, streams from Object Storage
-- **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
-- **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
-- **Email Service** (SMTP) → account confirmation and password recovery
+- **Frontend** (Next.js) → calls API via REST; browsers upload to and stream from Object Storage directly, through presigned URLs issued by the API
+- **API** (Nest.js, Compose service `nestjs-api`) → business rules, auth, reads/writes DB, opens multipart uploads in storage and signs presigned URLs, publishes jobs to queue, sends emails
+- **Video Worker** (Compose service `video-worker`, entrypoint `nestjs-project/src/worker.ts`) → a Nest application context (no HTTP server) that consumes jobs from the queue, runs the `ffprobe`/`ffmpeg` binaries, updates DB and storage
+- **Database** (PostgreSQL 17) → currently users, channels, auth tokens, videos (comments and likes are not implemented yet)
+- **Object Storage** (Garage, S3-compatible, accessed with AWS SDK v3; Compose services `garage` and the one-shot `garage-init`, which assigns the node layout and creates the access key and bucket) → video files and thumbnails
+- **Message Queue** (BullMQ on Redis 7, Compose service `redis`) → `video-processing` and `video-maintenance` queues
+- **Email Service** (SMTP; Mailpit in development) → account confirmation and password recovery
+
+## Video Upload & Processing (Phase 03, backend only)
+
+Implemented in `nestjs-project/src/videos/` (module details in `nestjs-project/CLAUDE.md`). All endpoints require a JWT and are scoped to the owner: another user's video answers `404 VIDEO_NOT_FOUND`. There is no anonymous access to videos yet, no endpoint to list videos, and nothing changes `publication_status` (every video stays `draft`).
+
+| Endpoint | Success | Purpose |
+|----------|---------|---------|
+| `POST /videos` | 201 | Body `{ filename, content_type, size_bytes }`. Pre-registers the video as a draft with a unique 11-char `public_id`, opens an S3 multipart upload, returns `part_size_bytes` and `part_count` |
+| `POST /videos/:public_id/upload-parts` | 200 | Body `{ part_numbers }`. Returns one presigned PUT URL per part |
+| `GET /videos/:public_id/upload-parts` | 200 | Lists parts already stored, so an interrupted upload can resume |
+| `POST /videos/:public_id/upload-completion` | 202 | Body `{ parts: [{ part_number, etag }] }`. Completes the multipart upload, verifies the final size, marks the video `processing` and enqueues the processing job |
+| `GET /videos/:public_id` | 200 | Processing status and extracted metadata |
+| `GET /videos/:public_id/playback-url` | 200 | Presigned GET URL for progressive playback (only when `ready`, else `409 VIDEO_NOT_READY`) |
+| `GET /videos/:public_id/download-url` | 200 | Presigned GET URL (only when `ready`) that requests `Content-Disposition: attachment; filename="<original name>.mp4"` through the `response-content-disposition` query parameter. Observed with Garage v2.4.1: the URL is accepted (`206` with Range) but the response carries no `Content-Disposition` header, so the download is not forced yet |
+
+Limits: files up to 10 GiB, sent in 64 MiB parts; accepted content types are `video/mp4` and `video/quicktime`.
+
+`processing_status` lifecycle: `uploading` → `processing` → `ready` | `failed` (with a `failure_code`). The worker never transcodes: it remuxes the upload to a faststart MP4 and extracts a JPEG thumbnail. The source file is deleted once the video is `ready`.
 
 ## Docker Networking
 
@@ -32,10 +50,12 @@ This project runs entirely in Docker containers. When configuring connections be
 
 Inside a container, `localhost` refers to the container itself, not the host machine or other containers. Services communicate through the Docker Compose network using their service names (e.g., `db`, `nestjs-api`).
 
-- **Correct:** `DB_HOST=db` (the Compose service name)
+- **Correct:** `DB_HOST=db`, `REDIS_HOST=redis`, `STORAGE_ENDPOINT=http://garage:3900` (the Compose service names)
 - **Wrong:** `DB_HOST=localhost`
 
 This applies to all environment variables, configuration files, and code that references service hosts.
+
+**Exception — browser-facing values.** `STORAGE_PUBLIC_ENDPOINT` (`http://localhost:3900` in `.env.example`) and `STORAGE_CORS_ORIGINS` (`http://localhost:3001`) are consumed by the user's browser, not by a container, so they intentionally point at the host. The public endpoint is baked into every presigned URL (its host is part of the signature), while server-to-storage traffic uses `STORAGE_ENDPOINT`. Because `localhost:3900` is unreachable from inside a container, the integration and e2e tests override `STORAGE_PUBLIC_ENDPOINT` to `http://host.docker.internal:3900`, which works through `extra_hosts` (`host.docker.internal:host-gateway`) on `nestjs-api` and `video-worker`.
 
 ## Working Principles
 
