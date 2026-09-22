@@ -1,17 +1,67 @@
 services:
   nestjs-api:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.dev
     ports:
       - 3000:3000
     volumes:
       - .:/home/node/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
       mailpit:
         condition: service_started
+
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/home/node/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+
+  garage:
+    image: dxflrs/garage:v2.4.1
+    ports:
+      - "3900:3900"
+    volumes:
+      - ./garage.toml:/etc/garage.toml
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+
+  garage-init:
+    image: alpine:3.20
+    depends_on:
+      garage:
+        condition: service_started
+    environment:
+      - STORAGE_ACCESS_KEY_ID=${STORAGE_ACCESS_KEY_ID}
+      - STORAGE_SECRET_ACCESS_KEY=${STORAGE_SECRET_ACCESS_KEY}
+      - STORAGE_BUCKET=${STORAGE_BUCKET}
+    volumes:
+      - ./scripts/garage-init.sh:/garage-init.sh:ro
+    entrypoint: ["sh", "-c", "apk add --no-cache curl jq >/dev/null && sh /garage-init.sh"]
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   db:
     image: postgres:17
@@ -33,4 +83,7 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+volumes:
+  garage-meta:
+  garage-data:
 
